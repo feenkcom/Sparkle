@@ -2328,7 +2328,7 @@ removeallclassmethods RsrSocketConnectionSpecification
 doit
 (RsrSocketConnectionSpecification
 	subclass: 'RsrAcceptConnection'
-	instVarNames: #( listener isListening isWaitingForConnection )
+	instVarNames: #( portRange listener isListening isWaitingForConnection )
 	classVars: #(  )
 	classInstVars: #(  )
 	poolDictionaries: #()
@@ -3689,24 +3689,6 @@ removeallclassmethods RsrStream
 
 doit
 (RsrStream
-	subclass: 'RsrGsSocketStream'
-	instVarNames: #( socket )
-	classVars: #(  )
-	classInstVars: #(  )
-	poolDictionaries: #()
-	inDictionary: Globals
-	options: #()
-)
-		category: 'RemoteServiceReplication-Factory-GemStone';
-		immediateInvariant.
-true.
-%
-
-removeallmethods RsrGsSocketStream
-removeallclassmethods RsrGsSocketStream
-
-doit
-(RsrStream
 	subclass: 'RsrSocketStream'
 	instVarNames: #( socket )
 	classVars: #(  )
@@ -3806,24 +3788,6 @@ true.
 
 removeallmethods RsrThreadSafeDictionary
 removeallclassmethods RsrThreadSafeDictionary
-
-doit
-(RsrObject
-	subclass: 'RsrTlsConnectionAcceptor'
-	instVarNames: #( host address port listener isListening isWaitingForConnection handshake certPath keyPath )
-	classVars: #(  )
-	classInstVars: #(  )
-	poolDictionaries: #()
-	inDictionary: Globals
-	options: #()
-)
-		category: 'RemoteServiceReplication-Factory-GemStone';
-		immediateInvariant.
-true.
-%
-
-removeallmethods RsrTlsConnectionAcceptor
-removeallclassmethods RsrTlsConnectionAcceptor
 
 doit
 (RsrObject
@@ -10599,13 +10563,9 @@ defaultPort
 
 category: 'instance creation'
 classmethod: RsrSocketConnectionSpecification
-host: hostnameOrAddress
-port: port
+host: hostnameOrAddress port: port
 
-	^self new
-		host: hostnameOrAddress;
-		port: port;
-		yourself
+	^ self subclassResponsibility
 %
 
 !		Instance methods for 'RsrSocketConnectionSpecification'
@@ -10656,11 +10616,36 @@ socketClass
 
 category: 'instance creation'
 classmethod: RsrAcceptConnection
+host: hostnameOrAddress port: portNumber
+
+	^ self new
+		  host: hostnameOrAddress;
+		  portRange: (portNumber to: portNumber);
+		  yourself
+%
+
+category: 'instance creation'
+classmethod: RsrAcceptConnection
+host: hostnameOrAddress portRange: anInterval
+
+	^ self new
+		  host: hostnameOrAddress;
+		  portRange: anInterval;
+		  yourself
+%
+
+category: 'instance creation'
+classmethod: RsrAcceptConnection
 port: aPortInteger
 
-	^super
-		host: self wildcardAddress
-		port: aPortInteger
+	^ self host: self wildcardAddress port: aPortInteger
+%
+
+category: 'instance creation'
+classmethod: RsrAcceptConnection
+portRange: anInterval
+
+	^ self host: self wildcardAddress portRange: anInterval
 %
 
 category: 'accessing'
@@ -10679,6 +10664,22 @@ wildcardPort
 
 !		Instance methods for 'RsrAcceptConnection'
 
+category: 'private'
+method: RsrAcceptConnection
+bind
+
+	"Attempt to listen on each of the port range, answer the successful port or signal RsrInvalidBind"
+
+	portRange do: [ :portToTry | 
+		[ 
+		listener bindAddress: self host port: portToTry.
+		^ portToTry ]
+			on: RsrInvalidBind
+			do: [ :ex | ex return ] ].
+	RsrInvalidBind signal:
+		'Cannot bind to any port in range ' , portRange printString
+%
+
 category: 'actions'
 method: RsrAcceptConnection
 cancelWaitForConnection
@@ -10691,10 +10692,8 @@ method: RsrAcceptConnection
 ensureListening
 
 	isListening ifTrue: [^self].
-	listener
-		bindAddress: self host
-		port: self port.
-	listener listen: 1.
+	self bind.
+	listener listen: 5.
 	isListening := true
 %
 
@@ -10733,6 +10732,20 @@ listeningPort
 
 	isListening ifFalse: [^nil].
 	^listener port
+%
+
+category: 'accessing'
+method: RsrAcceptConnection
+portRange
+
+	^ portRange
+%
+
+category: 'accessing'
+method: RsrAcceptConnection
+portRange: anObject
+
+	portRange := anObject
 %
 
 category: 'actions'
@@ -10819,6 +10832,18 @@ token: aToken
 %
 
 ! Class implementation for 'RsrInitiateConnection'
+
+!		Class methods for 'RsrInitiateConnection'
+
+category: 'instance creation'
+classmethod: RsrInitiateConnection
+host: hostnameOrAddress port: port
+
+	^ self new
+		  host: hostnameOrAddress;
+		  port: port;
+		  yourself
+%
 
 !		Instance methods for 'RsrInitiateConnection'
 
@@ -10994,15 +11019,6 @@ maximumReclamation
 category: 'instance creation'
 classmethod: RsrHandshake
 steps: anArrayOfSteps
-
-	^self new
-		steps: anArrayOfSteps;
-		yourself
-%
-
-category: 'instance creation'
-classmethod: RsrHandshake
-steps: anArrayOfSteps
 stream: aStream
 
 	^self new
@@ -11018,15 +11034,7 @@ method: RsrHandshake
 perform
 	"Perform the sequence of configured steps."
 
-	^self performOver: self stream
-%
-
-category: 'performing'
-method: RsrHandshake
-performOver: aStream
-	"Perform the sequence of configured steps."
-
-	self steps do: [:each | each performOver: aStream]
+	self steps do: [:each | each performOver: self stream]
 %
 
 category: 'accessing'
@@ -13613,7 +13621,7 @@ method: RsrSocket
 initialize
 
 	super initialize.
-	nativeSocket := GsSignalingSocket newIpv6.
+	nativeSocket := GsSignalingSocket new.
 %
 
 category: 'testing'
@@ -13739,106 +13747,6 @@ nextPutAll: aByteArray
 	"Write <aByteArray>'s elements to the backing store."
 
 	^self subclassResponsibility
-%
-
-! Class implementation for 'RsrGsSocketStream'
-
-!		Class methods for 'RsrGsSocketStream'
-
-category: 'instance creation'
-classmethod: RsrGsSocketStream
-on: anRsrSocket
-
-	^self new
-		socket: anRsrSocket;
-		yourself
-%
-
-!		Instance methods for 'RsrGsSocketStream'
-
-category: 'testing'
-method: RsrGsSocketStream
-atEnd
-	"Return whether additional bytes could become available on the socket."
-
-	^socket isConnected not
-%
-
-category: 'accessing'
-method: RsrGsSocketStream
-chunkSize
-	"The largest size that should be read from or written to a Socket in each attempt."
-
-	^4096
-%
-
-category: 'closing'
-method: RsrGsSocketStream
-close
-
-	socket close
-%
-
-category: 'accessing'
-method: RsrGsSocketStream
-next
-	"Return the next byte"
-
-	^self next: 1
-%
-
-category: 'accessing'
-method: RsrGsSocketStream
-next: count
-	"Return exactly <count> number of bytes.
-	Signal RsrSocketClosed if the socket closes."
-
-	^[| chunkSize bytes position numRead |
-	chunkSize := self chunkSize.
-	bytes := ByteArray new: count.
-	position := 1.
-	[position <= count]
-		whileTrue:
-			[numRead := socket
-				read: (chunkSize min: count - position + 1)
-				into: bytes
-				startingAt: position.
-			numRead > 0
-				ifFalse:
-					[socket close.
-					RsrSocketClosed signal].
-			GsFile gciLogClient: 'numRead: ', numRead printString.
-			position := position + numRead].
-	bytes]
-		on: SocketError
-		do: [:ex | ex resignalAs: (RsrSocketClosed new messageText: ex messageText)].
-%
-
-category: 'adding'
-method: RsrGsSocketStream
-nextPutAll: bytes
-	"Write <bytes> to the socket."
-
-	| chunkSize position numBytes numWritten |
-	chunkSize := self chunkSize.
-	position := 1.
-	numBytes := bytes size.
-	[position <= numBytes]
-		whileTrue:
-			[numWritten := [socket
-				write: (chunkSize min: numBytes - position + 1)
-				from: bytes
-				startingAt: position]
-					on: SocketError
-					do: [:ex | ex resignalAs: (RsrSocketClosed new messageText: ex messageText)].
-			position := position + numWritten]
-%
-
-category: 'accessing'
-method: RsrGsSocketStream
-socket: anRsrSocket
-
-	socket := anRsrSocket
 %
 
 ! Class implementation for 'RsrSocketStream'
@@ -14119,7 +14027,7 @@ executeCycle
 		do:
 			[:ex |
 			self reportException: ex.
-			self channel disconnected]
+			self channel channelDisconnected]
 %
 
 category: 'commands'
@@ -14177,15 +14085,10 @@ category: 'writing'
 method: RsrCommandSink
 writeCommand: aCommand
 
-	| bytes |
 	self report: aCommand.
-	bytes := ByteArray
-		streamContents:
-			[:stream |
-			aCommand
-				encode: stream
-				using: self encoder].
-	self write: bytes
+	aCommand
+		encode: self outStream
+		using: self encoder
 %
 
 ! Class implementation for 'RsrCommandSource'
@@ -14219,7 +14122,7 @@ executeCycle
 		do:
 			[:ex |
 			self reportException: ex.
-			self channel disconnected]
+			self channel channelDisconnected]
 %
 
 category: 'accessing'
@@ -14313,173 +14216,6 @@ ifAbsent: aBlock
 	^wasRemoved
 		ifTrue: [element]
 		ifFalse: [aBlock value]
-%
-
-! Class implementation for 'RsrTlsConnectionAcceptor'
-
-!		Class methods for 'RsrTlsConnectionAcceptor'
-
-category: 'instance creation'
-classmethod: RsrTlsConnectionAcceptor
-address: address
-port: port
-handshake: requiredHandshake
-certPath: certPath
-keyPath: keyPath
-
-	^self new
-		address: address;
-		port: port;
-		handshake: requiredHandshake;
-		certPath: certPath;
-		keyPath: keyPath;
-		yourself
-%
-
-!		Instance methods for 'RsrTlsConnectionAcceptor'
-
-category: 'accessing'
-method: RsrTlsConnectionAcceptor
-address
-	"Host address to listen on"
-
-	^address
-%
-
-category: 'accessing'
-method: RsrTlsConnectionAcceptor
-address: addressString
-	"Host address to listen on"
-
-	address := addressString
-%
-
-category: 'accessing'
-method: RsrTlsConnectionAcceptor
-certPath
-	"TLS Certificate Path"
-
-	^certPath
-%
-
-category: 'accessing'
-method: RsrTlsConnectionAcceptor
-certPath: certPathString
-	"TLS Certificate Path"
-
-	certPath := certPathString
-%
-
-category: 'actions'
-method: RsrTlsConnectionAcceptor
-ensureListening
-
-	isListening ifTrue: [^self].
-	[listener
-		bindTo: self port
-		toAddress: self address]
-		on: SocketError, OutOfRange
-		do: [:ex | ex resignalAs: (RsrInvalidBind new messageText: ex messageText)].
-	listener makeListener: 1.
-	isListening := true
-%
-
-category: 'accessing'
-method: RsrTlsConnectionAcceptor
-handshake
-	"Handshake required to successfully accept a Connection."
-
-	^handshake
-%
-
-category: 'accessing'
-method: RsrTlsConnectionAcceptor
-handshake: requiredHandshake
-	"Handshake required to successfully accept a Connection."
-
-	handshake := requiredHandshake
-%
-
-category: 'initializing'
-method: RsrTlsConnectionAcceptor
-initialize
-
-	super initialize.
-	listener := self socketClass newServerIpv6.
-	isWaitingForConnection := false.
-	isListening := false
-%
-
-category: 'accessing'
-method: RsrTlsConnectionAcceptor
-keyPath
-	"TLS Private Key Path"
-
-	^keyPath
-%
-
-category: 'accessing'
-method: RsrTlsConnectionAcceptor
-keyPath: keyPathString
-	"TLS Private Key Path"
-
-	keyPath := keyPathString
-%
-
-category: 'accessing'
-method: RsrTlsConnectionAcceptor
-port
-	"Listening port"
-
-	^port
-%
-
-category: 'accessing'
-method: RsrTlsConnectionAcceptor
-port: portNumber
-	"Listening port"
-
-	port := portNumber
-%
-
-category: 'accessing'
-method: RsrTlsConnectionAcceptor
-socketClass
-	"Return the class that should be used for creating Socket instances."
-
-	^GsSecureSocket
-%
-
-category: 'actions'
-method: RsrTlsConnectionAcceptor
-waitForConnection
-
-	| socket stream channel connection |
-	self ensureListening.
-	[isWaitingForConnection := true.
-	socket := [listener accept]
-		on: SocketError
-		do: [:ex | ex resignalAs: RsrWaitForConnectionCancelled new]]
-			ensure:
-				[listener close.
-				listener := nil.
-				isWaitingForConnection := false].
-	socket
-		useCertificateFile: self certPath
-		withPrivateKeyFile: self keyPath
-		privateKeyPassphrase: nil.
-	socket secureAccept.
-	stream := RsrGsSocketStream on: socket.
-	handshake performOver: stream.
-	channel := RsrBinaryStreamChannel
-		inStream: stream
-		outStream: stream.
-	connection := RsrConnection
-		specification: self
-		channel: channel
-		transactionSpigot: RsrThreadSafeNumericSpigot naturals
-		oidSpigot: RsrThreadSafeNumericSpigot naturals.
-	^connection open
 %
 
 ! Class implementation for 'RsrTokenExchangeMessage'
@@ -19631,6 +19367,195 @@ evaluateMethod: method inContext: context
 	explorerTool newInspectorToolOn: resultObject ].
 
 	processLauncher := self
+		newProcessLauncherWithBody: processBody
+		manager: processManager.
+
+	^ processLauncher launch
+%
+
+! Class extensions for 'SpkLogger'
+
+!		Class methods for 'SpkLogger'
+
+category: '*Sparkle-Tools-GemStone'
+classmethod: SpkLogger
+logError: messageString
+	GsFile gciLogServer: messageString
+%
+
+! Class extensions for 'SpkObject'
+
+!		Class methods for 'SpkObject'
+
+category: '*Sparkle-Tools-GemStone'
+classmethod: SpkObject
+new
+	^ super new initialize
+%
+
+!		Instance methods for 'SpkObject'
+
+category: '*Sparkle-Tools-GemStone'
+method: SpkObject
+flag: anObject
+	"Look at senders of #flag: to find code that needs further attention"
+%
+
+! Class extensions for 'SpkTaskspaceTool'
+
+!		Instance methods for 'SpkTaskspaceTool'
+
+category: '*Sparkle-Tools-GemStone'
+method: SpkTaskspaceTool
+abortTransactionAnnouncing: anAnnouncement
+	"Abort the current transaction. Announce the change to those interested."
+
+	| resultTool |
+	resultTool := self performTransactionAction: [System abortTransaction].
+	self announce: anAnnouncement.
+	^resultTool
+%
+
+category: '*Sparkle-Tools-GemStone'
+method: SpkTaskspaceTool
+beginTransactionAnnouncing: anAnnouncement
+	"Begin a new transaction. Announce the change to those interested."
+
+	| resultTool |
+	resultTool := self performTransactionAction: [System beginTransaction].
+	self announce: anAnnouncement.
+	^resultTool
+%
+
+category: '*Sparkle-Tools-GemStone'
+method: SpkTaskspaceTool
+commitTransactionAnnouncing: anAnnouncement
+	"Commit the current transaction. Announce the change to those interested."
+
+	| resultTool |
+	resultTool := self performTransactionAction: [System commit].
+	self announce: anAnnouncement.
+	^resultTool
+%
+
+category: '*Sparkle-Tools-GemStone'
+method: SpkTaskspaceTool
+initialize
+	super initialize.
+	name := 'Default Taskspace'.
+	processRegistry := SpkWeakKeyDictionary new
+%
+
+category: '*Sparkle-Tools-GemStone'
+method: SpkTaskspaceTool
+newProcessManager
+	"Create a new process to handle the asynchronous evaluation of an expression."
+
+	^ SpkProcessManager new
+		  taskspaceTool: self;
+		  debuggerDebugAction: nil;
+		  yourself
+%
+
+category: '*Sparkle-Tools-GemStone'
+method: SpkTaskspaceTool
+performTransactionAction: aBlock
+	"Perform some transaction related action."
+
+	| processManager processLauncher processResult processCompleted debuggerAnnounced |
+	processManager := self newProcessManager.
+	processManager announceNextDebug: true.
+	processCompleted := false.
+	processLauncher := self
+		newProcessLauncherWithBody: [ 
+			aBlock value.
+			processCompleted := true ]
+		manager: processManager.
+	processResult := processLauncher launch.	
+
+	"If there was an error in the process, a debugger
+	has already been announced to the process.
+	However, the process might have been terminated without
+	a debugger, and processResult is then a terminatedTool."
+	debuggerAnnounced := processManager announceNextDebug not.
+	processCompleted | debuggerAnnounced
+		ifFalse: [ self announceNewExplorerForPaneTool: processResult ].
+
+	"Even if we have announced a debugger or terminated tool, still have
+	to return a SuccessTool."
+	^ SpkSuccessTool new
+%
+
+category: '*Sparkle-Tools-GemStone'
+method: SpkTaskspaceTool
+registerManager: aProcessManager forProcess: aProcess
+	^ processRegistry
+		at: aProcess
+		ifPresent: [ :existingMgr | self error: 'Registering same process more than once.' ]
+		ifAbsentPut: [ aProcessManager ]
+%
+
+category: '*Sparkle-Tools-GemStone'
+method: SpkTaskspaceTool
+setAutomaticTransactionModeAnnouncing: anAnnouncement
+	"Abort the current transaction (implicit) and change to #autoBegin mode."
+
+	| resultTool |
+	resultTool := self performTransactionAction: [System transactionMode: #autoBegin].
+	self announce: anAnnouncement.
+	^resultTool
+%
+
+category: '*Sparkle-Tools-GemStone'
+method: SpkTaskspaceTool
+setManualTransactionModeAnnouncing: anAnnouncement
+	"Abort the current transaction (implicit) and change to #manualBegin mode."
+
+	| resultTool |
+	resultTool := self performTransactionAction: [System transactionMode: #manualBegin].
+	self announce: anAnnouncement.
+	^resultTool
+%
+
+! Class extensions for 'SpkTool'
+
+!		Instance methods for 'SpkTool'
+
+category: '*Sparkle-Tools-GemStone'
+method: SpkTool
+evaluationPriority
+	^ Processor userSchedulingPriority
+%
+
+! Class extensions for 'TestAsserter'
+
+!		Instance methods for 'TestAsserter'
+
+category: '*Announcements-Extensions-GemStone'
+method: TestAsserter
+should: aBlock notTakeMoreThan: aDuration
+	"Throw an exception if aBlock should take longer than aDuration to run.
+	 This is a toy implementation. It is should stop after the time limit.
+	 Instead, it just sees how long it took and complains if it was too long."
+
+	| msToRun actualDuration |
+	msToRun := Time millisecondsElapsedTime: aBlock.
+	actualDuration := Duration seconds: msToRun / 1000.
+	self assert: actualDuration <= aDuration
+		description: 'Block evaluation took more than the expected ', aDuration printString.
+	^ actualDuration
+%
+
+! Class Initialization
+
+run
+GemToGemAnnouncement initialize.
+RsrPlatformInitializer initialize.
+SpkHashTableSizes initialize.
+SpkServiceFactory initialize.
+true
+%
+ssLauncher := self
 		newProcessLauncherWithBody: processBody
 		manager: processManager.
 
